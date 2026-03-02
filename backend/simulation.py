@@ -18,8 +18,10 @@ from character import CharacterState, make_character
 from resolver import ActionResolver
 from prompts import (
     CHARACTER_DECISION_SYSTEM,
+    GOAL_CHECK_SYSTEM,
     WORLD_INIT_SYSTEM,
     build_character_decision_prompt,
+    build_goal_check_prompt,
     build_world_init_prompt,
 )
 
@@ -57,6 +59,7 @@ class Simulation:
         self.characters = characters   # char_id → CharacterState
         self.resolver = ActionResolver()
         self.event_log: List[Event] = []
+        self._goals_announced: set = set()   # char_ids whose achievement was already emitted
 
     async def run(
         self,
@@ -109,6 +112,37 @@ class Simulation:
                     "events": [_event_to_dict(e) for e in new_events],
                 })
 
+            # ── 4.5: Goal achievement check (Nova Micro, after turn 2) ────
+            if turn >= 3:
+                goal_checks = [
+                    self._check_goal_achieved(char)
+                    for char in active
+                    if not char.goal_achieved
+                ]
+                await asyncio.gather(*goal_checks, return_exceptions=True)
+
+                # Emit one event per newly-achieved goal
+                for char in active:
+                    if char.goal_achieved and char.id not in self._goals_announced:
+                        self._goals_announced.add(char.id)
+                        goal_event = Event(
+                            turn=turn,
+                            actor=char.id,
+                            action_type="goal_achieved",
+                            description=f"{char.name} achieved their goal: {char.goal}",
+                        )
+                        goal_event.witnessed_by = list(self.characters.keys())
+                        self.world.events.append(goal_event)
+                        self.event_log.append(goal_event)
+                        self._propagate(goal_event)
+
+                        if progress_callback:
+                            await progress_callback("goal_achieved_event", {
+                                "turn": turn,
+                                "character_name": char.name,
+                                "goal": char.goal,
+                            })
+
             # ── 5: Check ending conditions ────────────────────────────────
             if self._story_concluded(turn, max_turns):
                 break
@@ -127,7 +161,7 @@ class Simulation:
         prompt = build_character_decision_prompt(char, visible_objects, nearby_chars, self.world)
 
         action = await self.nova.invoke_json(
-            self.nova.lite(),
+            self.nova.micro(),
             CHARACTER_DECISION_SYSTEM,
             prompt,
             max_tokens=300,
@@ -172,15 +206,35 @@ class Simulation:
             elif event.action_type == "search" and "discovered" in event.description:
                 char.emotional_state = "surprised"
 
+    async def _check_goal_achieved(self, char: CharacterState) -> None:
+        """Ask Nova Micro if this character has achieved their goal."""
+        if char.goal_achieved:
+            return
+        recent = char.knowledge.witnessed_events[-6:]
+        if len(recent) < 2:
+            return  # not enough context to evaluate
+
+        prompt = build_goal_check_prompt(char, recent)
+        try:
+            result = await self.nova.invoke_json(
+                self.nova.micro(),
+                GOAL_CHECK_SYSTEM,
+                prompt,
+                max_tokens=60,
+                temperature=0.2,
+            )
+            if isinstance(result, dict) and result.get("achieved") is True:
+                char.goal_achieved = True
+        except Exception as exc:
+            print(f"[Goal check] {char.name}: {exc}")
+
     def _story_concluded(self, turn: int, max_turns: int) -> bool:
-        """Very light heuristic — let the narrative compiler handle the real ending."""
+        """Return True when the story has reached a natural ending point."""
         if turn >= max_turns:
             return True
-        # If every character has spoken at least once and we're past halfway, that's a story
-        if turn >= max_turns // 2:
-            speakers = {e.actor for e in self.event_log if e.action_type == "speak"}
-            if len(speakers) >= len(self.characters):
-                return False   # keep going until max_turns, richer story
+        # End early once any character achieves their goal (after a minimum arc)
+        if turn >= 3 and any(c.goal_achieved for c in self.characters.values()):
+            return True
         return False
 
 
@@ -210,14 +264,15 @@ async def initialize_world(
     preset_key = config.get("preset", "")
     preset_hint = PRESET_HINTS.get(preset_key, "")
 
-    prompt = build_world_init_prompt(theme, char_names, preset_hint)
+    # Pass full char_configs so Nova can generate goal-relevant objects and correct appearances
+    prompt = build_world_init_prompt(theme, char_configs, preset_hint)
 
     try:
         nova_data = await nova.invoke_json(
             nova.lite(),
             WORLD_INIT_SYSTEM,
             prompt,
-            max_tokens=1500,
+            max_tokens=2000,
             temperature=0.7,
         )
     except Exception as exc:
@@ -226,8 +281,9 @@ async def initialize_world(
 
     world = build_world_from_nova(nova_data, char_names)
 
-    # Assign starting positions from Nova's suggestion
+    # Assign starting positions and appearances from Nova's suggestion
     starting_positions: Dict[str, str] = nova_data.get("character_starting_positions", {})
+    appearance_map: Dict[str, str] = nova_data.get("character_appearances", {})
     location_names = list(world.locations.keys())
 
     characters: Dict[str, CharacterState] = {}
@@ -238,6 +294,7 @@ async def initialize_world(
             start_loc = location_names[i % len(location_names)] if location_names else "Unknown"
 
         char_cfg["starting_location"] = start_loc
+        char_cfg["appearance"] = appearance_map.get(char_cfg["name"], "")
         char = make_character(char_cfg)
         characters[char.id] = char
         world.characters[char.id] = CharacterPosition(location=start_loc)

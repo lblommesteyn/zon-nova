@@ -105,11 +105,23 @@ class NarrativeCompiler:
             seed=seed * 37,
         )
 
-    async def generate_illustration_prompts(self, pages: List[Dict]) -> List[str]:
+    async def generate_illustration_prompts(
+        self,
+        pages: List[Dict],
+        characters: List[CharacterState] | None = None,
+    ) -> List[str]:
         """
         Generate one illustration prompt per page, in parallel.
+        Passes character appearance descriptions so each image is visually consistent.
         """
-        tasks = [self._gen_illus_prompt(page) for page in pages]
+        # Build name → appearance map from character states
+        appearance_map: Dict[str, str] = {}
+        if characters:
+            for c in characters:
+                if c.appearance:
+                    appearance_map[c.name] = c.appearance
+
+        tasks = [self._gen_illus_prompt(page, appearance_map) for page in pages]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         prompts = []
@@ -123,13 +135,13 @@ class NarrativeCompiler:
                 prompts.append(result)
         return prompts
 
-    async def _gen_illus_prompt(self, page: Dict) -> str:
-        prompt = build_illustration_prompt(page)
+    async def _gen_illus_prompt(self, page: Dict, appearance_map: Dict[str, str] | None = None) -> str:
+        prompt = build_illustration_prompt(page, appearance_map)
         return await self.nova.invoke(
             self.nova.lite(),
             ILLUSTRATION_SYSTEM,
             prompt,
-            max_tokens=250,
+            max_tokens=300,
             temperature=0.7,
         )
 

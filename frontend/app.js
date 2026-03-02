@@ -1,4 +1,4 @@
-/* ─── Emergent Story Engine — Frontend ─────────────────────────────────────── */
+/* ─── Fable — Frontend ──────────────────────────────────────────────────────── */
 
 const WS_URL = `ws://${location.host}/ws/generate`;
 
@@ -16,6 +16,8 @@ const state = {
   maxTurns: 8,
   ws: null,
   charColorMap: {},
+  charIdMap: {},         // char_id → display name (from world_ready)
+  lastConfig: null,      // last generation config — for "Same World, New Story"
 };
 
 // ─── Presets ───────────────────────────────────────────────────────────────────
@@ -62,6 +64,80 @@ function getCharConfigs() {
   })).filter(c => c.name);
 }
 
+// ─── Intro typewriter sequence ──────────────────────────────────────────────────
+// Runs once on page load: ornament fades in → title types → tagline types → body reveals
+
+function runIntro() {
+  const ornament = $('header-ornament');
+  const titleEl  = $('header-title');
+  const tagEl    = $('header-tagline');
+  const bodyEl   = $('setup-body');
+
+  const TITLE   = 'Fable';
+  const TAGLINE = 'Characters with secrets. Stories that choose their own ending.';
+
+  // Phase 1 — ornament fades in
+  setTimeout(() => {
+    ornament.classList.add('visible');
+  }, 180);
+
+  // Phase 2 — title types in, letter by letter (slow, deliberate)
+  function typeTitle(onDone) {
+    let i = 0;
+
+    // Insert the block cursor
+    const cursor = document.createElement('span');
+    cursor.className = 'intro-cursor';
+    titleEl.appendChild(cursor);
+
+    function step() {
+      if (i < TITLE.length) {
+        cursor.insertAdjacentText('beforebegin', TITLE[i++]);
+        setTimeout(step, 110 + Math.random() * 60);  // 110–170 ms per char — weighty
+      } else {
+        // Pause, then widen letter-spacing and remove cursor
+        setTimeout(() => {
+          titleEl.classList.add('done');
+          setTimeout(() => {
+            cursor.remove();
+            if (onDone) onDone();
+          }, 400);
+        }, 300);
+      }
+    }
+    setTimeout(step, 0);
+  }
+
+  // Phase 3 — tagline types in (faster, italic whisper)
+  function typeTagline(onDone) {
+    let i = 0;
+    function step() {
+      if (i < TAGLINE.length) {
+        tagEl.textContent += TAGLINE[i++];
+        setTimeout(step, 28 + Math.random() * 12);
+      } else {
+        if (onDone) onDone();
+      }
+    }
+    setTimeout(step, 0);
+  }
+
+  // Sequence: wait → type title → pause → type tagline → reveal body
+  setTimeout(() => {
+    typeTitle(() => {
+      setTimeout(() => {
+        typeTagline(() => {
+          setTimeout(() => {
+            bodyEl.classList.add('visible');
+          }, 200);
+        });
+      }, 160);
+    });
+  }, 320);
+}
+
+runIntro();
+
 function fillPresetChars(preset) {
   const defaults = PRESET_DEFAULTS[preset] || [];
   document.querySelectorAll('.char-card').forEach((card, i) => {
@@ -74,6 +150,24 @@ function fillPresetChars(preset) {
   });
 }
 
+// ─── Theme background crossfade ────────────────────────────────────────────────
+
+let _bgActive = 'a';
+
+function setThemeBg(preset) {
+  const next   = _bgActive === 'a' ? 'b' : 'a';
+  const nextEl = $('tbg-' + next);
+  const curEl  = $('tbg-' + _bgActive);
+
+  // Assign new theme class to the off-screen layer, then cross-fade
+  const cls = preset ? `tbg-${preset}` : 'tbg-enchanted_forest';
+  nextEl.className = `theme-bg-layer ${cls}`;
+  nextEl.classList.add('active');
+  curEl.classList.remove('active');
+
+  _bgActive = next;
+}
+
 // ─── Setup interactions ─────────────────────────────────────────────────────────
 
 document.querySelectorAll('.theme-card').forEach(card => {
@@ -83,15 +177,32 @@ document.querySelectorAll('.theme-card').forEach(card => {
     state.selectedPreset = card.dataset.preset;
     state.selectedTheme  = card.dataset.theme;
     $('custom-theme').value = '';
+    $('custom-panel').classList.remove('active');
     fillPresetChars(state.selectedPreset);
+    setThemeBg(state.selectedPreset);
   });
 });
 
-$('custom-theme').addEventListener('input', () => {
-  if ($('custom-theme').value.trim()) {
-    document.querySelectorAll('.theme-card').forEach(c => c.classList.remove('selected'));
-    state.selectedPreset = '';
-    state.selectedTheme  = $('custom-theme').value.trim();
+// Custom world panel interactions
+const _customPanel = $('custom-panel');
+const _customInput = $('custom-theme');
+
+_customInput.addEventListener('focus', () => {
+  document.querySelectorAll('.theme-card').forEach(c => c.classList.remove('selected'));
+  _customPanel.classList.add('active');
+  state.selectedPreset = '';
+  setThemeBg('custom');
+});
+
+_customInput.addEventListener('input', () => {
+  const val = _customInput.value.trim();
+  state.selectedTheme = val || null;
+  if (val) _customPanel.classList.add('active');
+});
+
+_customInput.addEventListener('blur', () => {
+  if (!_customInput.value.trim()) {
+    _customPanel.classList.remove('active');
   }
 });
 
@@ -112,23 +223,26 @@ $('generate-btn').addEventListener('click', () => {
   state.charColorMap = {};
   characters.forEach((c, i) => { state.charColorMap[c.name] = i % 5; });
 
-  startGeneration({
+  const config = {
     theme:     state.selectedTheme || $('custom-theme').value.trim() || 'magical adventure',
     preset:    state.selectedPreset || '',
     characters,
     max_turns: state.maxTurns,
-  });
+  };
+  state.lastConfig = config;
+  startGeneration(config);
 });
 
 // ─── WebSocket ─────────────────────────────────────────────────────────────────
 
 function startGeneration(config) {
+  cleanup3D();
   showScreen('simulation-screen');
   clearSimLog();
   setProgress(0);
   Object.assign(state, {
     pages: [], eventLog: [], worldSummary: {},
-    illustrationPrompts: [], pageImages: [],
+    illustrationPrompts: [], pageImages: [], charIdMap: {},
   });
 
   const ws = new WebSocket(WS_URL);
@@ -150,6 +264,8 @@ function handleMessage(msg, config) {
       const locs = Object.keys(msg.world?.locations || {});
       addLog('status', null, `World: ${msg.world?.setting_name || '…'}`);
       if (locs.length) addLog('status', null, locs.join('  ·  '));
+      // Build char_id → name map for divergence viz
+      (msg.characters || []).forEach(c => { state.charIdMap[c.id] = c.name; });
       setProgress(8);
       break;
     }
@@ -168,6 +284,12 @@ function handleMessage(msg, config) {
     case 'turn_complete':
       addLog('turn-marker', null, `turn ${msg.turn} resolved`);
       break;
+
+    case 'goal_achieved_event': {
+      const { character_name, goal } = msg;
+      addLog('goal-achieved', null, `★ ${character_name} achieved their goal: "${goal}"`);
+      break;
+    }
 
     case 'story_text_ready':
       // Story text arrived — switch to storybook, images will stream in
@@ -199,16 +321,51 @@ function handleMessage(msg, config) {
 
 // ─── Sim log ───────────────────────────────────────────────────────────────────
 
-function clearSimLog() { $('sim-log').innerHTML = ''; }
+let _logGen = 0;  // incremented on clear — orphaned typeText callbacks self-cancel
+
+function clearSimLog() { _logGen++; $('sim-log').innerHTML = ''; }
 function setStatus(t)  { $('sim-status-text').textContent = t; }
 function setProgress(p){ $('progress-bar').style.width = `${p}%`; }
+
+// Typewriter — types `fullText` into `el`, then calls onDone.
+// Uses generation guard so stale callbacks after clearSimLog are no-ops.
+function typeText(el, fullText, msPerChar, onDone) {
+  const gen = _logGen;
+  let i = 0;
+
+  // Blinking cursor stays at the end while typing
+  const cursor = document.createElement('span');
+  cursor.className = 'type-cursor';
+  el.appendChild(cursor);
+
+  const simLog = $('sim-log');
+
+  function step() {
+    if (_logGen !== gen) return;          // log was cleared — abandon
+    if (i < fullText.length) {
+      cursor.insertAdjacentText('beforebegin', fullText[i++]);
+      simLog.scrollTop = simLog.scrollHeight;
+      setTimeout(step, msPerChar + Math.random() * 10);
+    } else {
+      cursor.remove();
+      simLog.scrollTop = simLog.scrollHeight;
+      if (onDone) onDone();
+    }
+  }
+
+  // First character after a small delay so the entry slide-in plays first
+  setTimeout(step, 30);
+}
 
 function addLog(type, charName, text, motivation) {
   const log   = $('sim-log');
   const entry = document.createElement('div');
   entry.className = `log-entry ${type}`;
+  log.appendChild(entry);
+  log.scrollTop = log.scrollHeight;
 
   if (type === 'action' && charName) {
+    // Char tag appears instantly
     const ci  = state.charColorMap[charName] ?? 0;
     const tag = document.createElement('span');
     tag.className  = 'char-tag';
@@ -216,22 +373,27 @@ function addLog(type, charName, text, motivation) {
     tag.textContent = charName;
     entry.appendChild(tag);
 
+    // Main action text — speed adapts to length so long lines don't drag
     const txt = document.createElement('span');
-    txt.textContent = text;
     entry.appendChild(txt);
+    const mainSpeed = Math.min(20, Math.max(10, Math.round(1400 / Math.max(text.length, 1))));
 
-    if (motivation) {
+    typeText(txt, text, mainSpeed, motivation ? () => {
+      // Motivation types in after a brief pause
       const m = document.createElement('span');
-      m.className   = 'motivation-text';
-      m.textContent = ` — ${motivation}`;
+      m.className = 'motivation-text';
       entry.appendChild(m);
-    }
-  } else {
-    entry.textContent = text;
-  }
+      setTimeout(() => typeText(m, ` — ${motivation}`, 12), 60);
+    } : null);
 
-  log.appendChild(entry);
-  log.scrollTop = log.scrollHeight;
+  } else {
+    const txt = document.createElement('span');
+    entry.appendChild(txt);
+    const speed = type === 'goal-achieved' ? 24
+                : type === 'turn-marker'   ? 22
+                : 16;
+    typeText(txt, text, speed);
+  }
 }
 
 function showError(msg) {
@@ -257,6 +419,9 @@ function renderStorybook() {
 
   state.spreadIndex = -1;
   renderSpread();
+
+  // 3D book-opening splash — plays over the rendered storybook then fades away
+  initBook3D(sn);
 }
 
 function renderSpread() {
@@ -379,6 +544,10 @@ function updateNav() {
   $('prev-btn').disabled = state.spreadIndex <= -1;
   $('next-btn').disabled = state.spreadIndex >= maxSpread;
 
+  const onPage = state.spreadIndex >= 0;
+  $('read-aloud-btn').disabled = !onPage || !window.speechSynthesis;
+  if (!onPage) stopReading();
+
   if (state.spreadIndex === -1) {
     $('page-indicator').textContent = `Cover  ·  ${state.pages.length} pages`;
   } else {
@@ -388,12 +557,69 @@ function updateNav() {
 }
 
 $('prev-btn').addEventListener('click', () => {
-  if (state.spreadIndex > -1) { state.spreadIndex--; renderSpread(); }
+  if (state.spreadIndex > -1) { stopReading(); state.spreadIndex--; renderSpread(); }
 });
 $('next-btn').addEventListener('click', () => {
-  if (state.spreadIndex < state.pages.length - 1) { state.spreadIndex++; renderSpread(); }
+  if (state.spreadIndex < state.pages.length - 1) { stopReading(); state.spreadIndex++; renderSpread(); }
 });
-$('restart-btn').addEventListener('click', () => showScreen('setup-screen'));
+$('restart-btn').addEventListener('click', () => { stopReading(); cleanup3D(); showScreen('setup-screen'); });
+
+$('rerun-btn').addEventListener('click', () => {
+  stopReading();
+  cleanup3D();
+  if (!state.lastConfig) { showScreen('setup-screen'); return; }
+  startGeneration(state.lastConfig);
+});
+
+// ─── Read Aloud (Web Speech API) ───────────────────────────────────────────────
+
+let _reading = false;
+
+function stopReading() {
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  _reading = false;
+  const btn = $('read-aloud-btn');
+  if (btn) { btn.textContent = '▶ Read Aloud'; btn.classList.remove('reading'); }
+}
+
+function readPageAloud(idx) {
+  if (!window.speechSynthesis) return;
+  const page = state.pages[idx];
+  if (!page) return;
+
+  if (_reading) { stopReading(); return; }   // toggle off
+
+  window.speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(page.text);
+  utterance.rate  = 0.88;   // gentle bedtime pace
+  utterance.pitch = 1.05;
+  utterance.volume = 1.0;
+
+  // Prefer a warm English voice
+  const pick = () => {
+    const voices = window.speechSynthesis.getVoices();
+    return (
+      voices.find(v => /Samantha|Karen|Moira|Fiona/.test(v.name)) ||
+      voices.find(v => v.lang === 'en-US' && !v.name.includes('Google')) ||
+      voices.find(v => v.lang.startsWith('en'))
+    );
+  };
+  const v = pick();
+  if (v) utterance.voice = v;
+
+  utterance.onend = () => stopReading();
+  utterance.onerror = () => stopReading();
+
+  _reading = true;
+  const btn = $('read-aloud-btn');
+  btn.textContent = '■ Stop Reading';
+  btn.classList.add('reading');
+  window.speechSynthesis.speak(utterance);
+}
+
+$('read-aloud-btn').addEventListener('click', () => {
+  if (state.spreadIndex >= 0) readPageAloud(state.spreadIndex);
+});
 
 // ─── Replay log ─────────────────────────────────────────────────────────────────
 
@@ -407,24 +633,297 @@ $('log-toggle-btn').addEventListener('click', () => {
 function populateReplayLog() {
   const container = $('replay-log');
   container.innerHTML = '';
+
+  // Build full character list from color map keys
+  const allCharNames = Object.keys(state.charColorMap);
+
   state.eventLog.forEach(evt => {
+    const isGoal = evt.action_type === 'goal_achieved';
+
     const entry = document.createElement('div');
-    entry.className = 'log-entry action';
+    entry.className = isGoal ? 'log-entry goal-achieved' : 'log-entry action';
     entry.style.animation = 'none';
 
-    const ci  = state.charColorMap[evt.actor] ?? 0;
-    const tag = document.createElement('span');
-    tag.className   = 'char-tag';
-    tag.dataset.ci  = ci;
-    tag.textContent = evt.actor || '?';
-    entry.appendChild(tag);
+    if (isGoal) {
+      entry.textContent = `★ ${evt.description}`;
+    } else {
+      const actorName = state.charIdMap[evt.actor] || evt.actor || '?';
+      const ci  = state.charColorMap[actorName] ?? 0;
+      const tag = document.createElement('span');
+      tag.className   = 'char-tag';
+      tag.dataset.ci  = ci;
+      tag.textContent = actorName;
+      entry.appendChild(tag);
 
-    const txt = document.createElement('span');
-    txt.textContent = ` T${evt.turn} · ${evt.description}`;
-    entry.appendChild(txt);
+      const txt = document.createElement('span');
+      txt.textContent = ` T${evt.turn} · ${evt.description}`;
+      entry.appendChild(txt);
+
+      // ── Knowledge divergence: show who saw vs who missed this event ──
+      if (evt.witnessed_by && allCharNames.length > 0) {
+        const witnessNames = (evt.witnessed_by || [])
+          .map(id => state.charIdMap[id] || id)
+          .filter(Boolean);
+        const missedNames = allCharNames.filter(n => !witnessNames.includes(n));
+
+        const div = document.createElement('div');
+        div.className = 'witness-row';
+
+        if (witnessNames.length) {
+          const saw = document.createElement('span');
+          saw.className = 'witness-tag saw';
+          saw.textContent = `saw: ${witnessNames.join(', ')}`;
+          div.appendChild(saw);
+        }
+        if (missedNames.length) {
+          const missed = document.createElement('span');
+          missed.className = 'witness-tag missed';
+          missed.textContent = `missed: ${missedNames.join(', ')}`;
+          div.appendChild(missed);
+        }
+        entry.appendChild(div);
+      }
+    }
 
     container.appendChild(entry);
   });
+}
+
+// ─── 3D Book Opening Animation (Three.js) ──────────────────────────────────────
+
+function cleanup3D() {
+  if (state._book3d) {
+    if (state._book3d.animId) cancelAnimationFrame(state._book3d.animId);
+    if (state._book3d.renderer) state._book3d.renderer.dispose();
+    state._book3d = null;
+  }
+  const splash = $('book-3d-splash');
+  if (splash) {
+    splash.style.display = 'none';
+    splash.style.opacity = '';
+    splash.style.transition = '';
+    splash.innerHTML = '';
+  }
+}
+
+function transitionTo2D() {
+  const splash = $('book-3d-splash');
+  // Cancel the animation loop before fading
+  if (state._book3d && state._book3d.animId) {
+    cancelAnimationFrame(state._book3d.animId);
+    state._book3d.animId = null;
+  }
+  splash.style.transition = 'opacity 0.7s ease';
+  splash.style.opacity = '0';
+  setTimeout(cleanup3D, 750);
+}
+
+function initBook3D(settingName) {
+  if (typeof THREE === 'undefined') return;   // CDN not loaded
+
+  const splash = $('book-3d-splash');
+  cleanup3D();                                // clear any stale previous run
+  splash.style.opacity = '1';
+  splash.style.transition = '';
+  splash.style.display = 'block';
+
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+
+  // ── Scene ──────────────────────────────────────────────────────────────────
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x060c07);
+
+  const camera = new THREE.PerspectiveCamera(46, W / H, 0.1, 50);
+  camera.position.set(0, 1.1, 4.2);
+  camera.lookAt(0, 0.1, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(W, H);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  splash.appendChild(renderer.domElement);
+
+  state._book3d = { renderer, animId: null };
+
+  // ── Lighting ───────────────────────────────────────────────────────────────
+  scene.add(new THREE.AmbientLight(0xffffff, 0.38));
+  const key = new THREE.DirectionalLight(0xf5dfa0, 1.0);
+  key.position.set(2, 5, 3);
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0x304830, 0.3);
+  fill.position.set(-3, -1, -2);
+  scene.add(fill);
+
+  // ── Book dimensions ────────────────────────────────────────────────────────
+  const bW = 1.15;   // width (X)
+  const bH = 1.55;   // depth/height of book (Z, portrait)
+  const bD = 0.09;   // thickness (Y)
+
+  // ── Book group (all geometry — rotated together in phase 2) ────────────────
+  const bookGroup = new THREE.Group();
+  scene.add(bookGroup);
+
+  // Pages block (base) — parchment top, leather bottom
+  const baseMats = [
+    new THREE.MeshLambertMaterial({ color: 0xd8c9a8 }), // right edge
+    new THREE.MeshLambertMaterial({ color: 0x182d1a }), // left edge (spine side)
+    new THREE.MeshLambertMaterial({ color: 0xd8c9a8 }), // top (inside pages)
+    new THREE.MeshLambertMaterial({ color: 0x182d1a }), // bottom (back cover)
+    new THREE.MeshLambertMaterial({ color: 0xd8c9a8 }), // front edge
+    new THREE.MeshLambertMaterial({ color: 0xd8c9a8 }), // back edge
+  ];
+  const baseGeo = new THREE.BoxGeometry(bW, bD, bH);
+  const base    = new THREE.Mesh(baseGeo, baseMats);
+  base.position.y = -bD / 2;
+  bookGroup.add(base);
+
+  // Spine strip
+  const spineGeo = new THREE.BoxGeometry(0.055, bD + 0.004, bH);
+  const spineMat = new THREE.MeshLambertMaterial({ color: 0x0d1f0f });
+  const spineObj = new THREE.Mesh(spineGeo, spineMat);
+  spineObj.position.set(-bW / 2 - 0.027, 0, 0);
+  bookGroup.add(spineObj);
+
+  // ── Cover canvas texture ───────────────────────────────────────────────────
+  const cvs = document.createElement('canvas');
+  cvs.width = 512; cvs.height = 682;
+  const ctx = cvs.getContext('2d');
+
+  // Leather background
+  ctx.fillStyle = '#182d1a';
+  ctx.fillRect(0, 0, 512, 682);
+
+  // Outer gold border
+  ctx.strokeStyle = '#9a7018';
+  ctx.lineWidth = 7;
+  ctx.strokeRect(16, 16, 480, 650);
+
+  // Inner gold border
+  ctx.strokeStyle = '#c09028';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(26, 26, 460, 630);
+
+  // Corner ornaments
+  ctx.fillStyle = '#c09028';
+  ctx.font = '18px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  [[32, 32], [480, 32], [32, 650], [480, 650]].forEach(([cx, cy]) => {
+    ctx.fillText('✦', cx, cy);
+  });
+
+  // Title (word-wrapped)
+  ctx.fillStyle = '#d8b878';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = 'italic 300 44px Georgia, serif';
+
+  const titleWords = settingName.split(' ');
+  const titleLines = [];
+  let cur = '';
+  for (const w of titleWords) {
+    const test = cur ? cur + ' ' + w : w;
+    if (ctx.measureText(test).width > 390 && cur) {
+      titleLines.push(cur);
+      cur = w;
+    } else {
+      cur = test;
+    }
+  }
+  if (cur) titleLines.push(cur);
+
+  const lineH  = 58;
+  const totalH = titleLines.length * lineH;
+  let ty = 341 - totalH / 2 + lineH * 0.78;
+  for (const line of titleLines) {
+    ctx.fillText(line, 256, ty);
+    ty += lineH;
+  }
+
+  // Ornament above title
+  ctx.fillStyle = '#c09028';
+  ctx.font = '30px serif';
+  ctx.fillText('✦', 256, 341 - totalH / 2 - 16);
+
+  // Thin rule under ornament
+  ctx.strokeStyle = '#9a7018';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(136, 341 - totalH / 2 - 3);
+  ctx.lineTo(376, 341 - totalH / 2 - 3);
+  ctx.stroke();
+
+  // Subtitle
+  ctx.fillStyle = '#7a6848';
+  ctx.font = '300 20px Georgia, serif';
+  ctx.fillText('An Emergent Story', 256, 341 + totalH / 2 + 36);
+
+  const coverTex = new THREE.CanvasTexture(cvs);
+
+  // ── Cover pivot (hinge at spine) ───────────────────────────────────────────
+  // Phase 1: cover swings outward around the spine (rotation.z, 0 → π)
+  const coverPivot = new THREE.Group();
+  coverPivot.position.set(-bW / 2, 0, 0);   // hinge at spine
+  bookGroup.add(coverPivot);
+
+  // Outside face — textured leather cover; center at (bW/2, bD/2+ε, 0) in pivot-local space
+  const coverOutGeo = new THREE.PlaneGeometry(bW, bH);
+  const coverOutMat = new THREE.MeshLambertMaterial({ map: coverTex, side: THREE.FrontSide });
+  const coverOut    = new THREE.Mesh(coverOutGeo, coverOutMat);
+  coverOut.rotation.x = -Math.PI / 2;
+  coverOut.position.set(bW / 2, bD / 2 + 0.002, 0);
+  coverPivot.add(coverOut);
+
+  // Inside face — dark leather (visible once cover swings past vertical)
+  const coverInGeo = new THREE.PlaneGeometry(bW, bH);
+  const coverInMat = new THREE.MeshLambertMaterial({ color: 0x0e1e10, side: THREE.FrontSide });
+  const coverIn    = new THREE.Mesh(coverInGeo, coverInMat);
+  coverIn.rotation.x = Math.PI / 2;
+  coverIn.position.set(bW / 2, bD / 2 + 0.001, 0);
+  coverPivot.add(coverIn);
+
+  // ── Animation loop ─────────────────────────────────────────────────────────
+  // Two phases within a single timeline (t = 0→1):
+  //   Phase 1 (t 0.00→0.55): cover swings open around spine (rotation.z)
+  //   Phase 2 (t 0.50→1.00): open book tilts toward camera + camera zooms
+  let startTs    = null;
+  const DELAY    = 600;    // ms — pause before animation begins
+  const DURATION = 3200;   // ms — total animation duration
+
+  function easeInOut(t) { return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; }
+  function easeIn(t)    { return t * t * t; }
+
+  function animate(ts) {
+    if (!startTs) startTs = ts;
+    const elapsed = ts - startTs;
+
+    if (elapsed > DELAY) {
+      const t = Math.min((elapsed - DELAY) / DURATION, 1.0);
+
+      // Phase 1 — cover opens outward around the spine
+      const t1 = Math.min(t / 0.55, 1.0);
+      coverPivot.rotation.z = easeInOut(t1) * Math.PI;
+
+      // Phase 2 — open book tilts toward camera + camera zooms in
+      if (t > 0.50) {
+        const t2 = easeIn((t - 0.50) / 0.50);
+        bookGroup.rotation.x = t2 * (Math.PI / 3);
+        camera.position.z    = 4.2 - t2 * 1.5;
+        camera.position.y    = 1.1 - t2 * 0.4;
+      }
+    }
+
+    renderer.render(scene, camera);
+
+    if (elapsed >= DELAY + DURATION) {
+      transitionTo2D();
+      return;
+    }
+
+    state._book3d.animId = requestAnimationFrame(animate);
+  }
+
+  state._book3d.animId = requestAnimationFrame(animate);
 }
 
 // ─── Keyboard ───────────────────────────────────────────────────────────────────

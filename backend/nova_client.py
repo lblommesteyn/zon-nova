@@ -10,6 +10,7 @@ import boto3
 from typing import Any
 
 # Model IDs — update if Nova 2 Pro becomes generally available
+NOVA_MICRO_MODEL_ID = "us.amazon.nova-micro-v1:0"
 NOVA_LITE_MODEL_ID = "us.amazon.nova-2-lite-v1:0"
 NOVA_PRO_MODEL_ID = "us.amazon.nova-pro-v1:0"   # Nova 1 Pro until Nova 2 Pro is GA
 
@@ -161,6 +162,9 @@ class NovaClient:
             self._generate_image_sync,
             prompt, negative_prompt, width, height, seed,
         )
+
+    def micro(self) -> str:
+        return NOVA_MICRO_MODEL_ID
 
     def lite(self) -> str:
         return NOVA_LITE_MODEL_ID

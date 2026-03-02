@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Emergent Story Engine</title>
+  <title>Fable</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,300;1,400;1,600&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet" />
@@ -11,15 +11,23 @@
 </head>
 <body>
 
+<!-- Theme background crossfade layers (behind all screens, z-index 0) -->
+<div id="tbg-a" class="theme-bg-layer tbg-enchanted_forest active"></div>
+<div id="tbg-b" class="theme-bg-layer tbg-enchanted_forest"></div>
+
 <!-- ══════════════════════════════════════════════════════════════════════════
      SCREEN 1 — SETUP
 ══════════════════════════════════════════════════════════════════════════ -->
 <div id="setup-screen" class="screen active">
 
   <header class="setup-header">
-    <h1>Emergent Story Engine</h1>
-    <p>Characters make decisions. The story emerges. Every run is different.</p>
+    <div class="setup-header-ornament" id="header-ornament">✦</div>
+    <h1 id="header-title" aria-label="Fable"></h1>
+    <p class="setup-tagline" id="header-tagline"></p>
   </header>
+
+  <!-- Everything below the header fades in after the title types -->
+  <div class="setup-body" id="setup-body">
 
   <!-- Theme -->
   <div class="theme-section">
@@ -28,24 +36,70 @@
       <div class="theme-card" data-preset="enchanted_forest" data-theme="Enchanted Forest">
         <span class="theme-icon">🌲</span>
         <span class="theme-name">Enchanted Forest</span>
+        <span class="theme-desc">Talking animals, ancient magic, and secret fairy rings</span>
       </div>
       <div class="theme-card" data-preset="pirate_ship" data-theme="Pirate Ship Adventure">
         <span class="theme-icon">🏴‍☠️</span>
         <span class="theme-name">Pirate Ship</span>
+        <span class="theme-desc">Hidden treasure, sparkling seas, and a daring crew</span>
       </div>
       <div class="theme-card" data-preset="space_station" data-theme="Space Station">
         <span class="theme-icon">🚀</span>
         <span class="theme-name">Space Station</span>
+        <span class="theme-desc">Orbiting stars, zero gravity, and a mystery in the hold</span>
       </div>
       <div class="theme-card" data-preset="underwater_kingdom" data-theme="Underwater Kingdom">
         <span class="theme-icon">🐠</span>
         <span class="theme-name">Underwater Kingdom</span>
+        <span class="theme-desc">Coral palaces, bioluminescent depths, sunken secrets</span>
       </div>
     </div>
   </div>
 
-  <div class="custom-input-wrap">
-    <input type="text" id="custom-theme" placeholder="or describe your own world…" />
+  <div class="custom-world-panel" id="custom-panel">
+    <div class="custom-panel-label">
+      <span class="cpl-icon">✦</span>
+      Craft your own world
+    </div>
+    <textarea id="custom-theme" rows="2"
+      placeholder="A clockwork city where the gears are made of frozen time, and every citizen hides a secret the city itself is trying to forget…"></textarea>
+
+    <div class="custom-chars-section" id="custom-chars">
+      <div class="custom-chars-label">✦ Your characters</div>
+
+      <div class="custom-char-slot">
+        <div class="cc-row">
+          <input type="text" class="char-name cc-input" placeholder="Character name" />
+          <input type="text" class="char-traits cc-input" placeholder="Personality (brave, curious…)" />
+        </div>
+        <div class="cc-row">
+          <input type="text" class="char-goal cc-input" placeholder="What they want" />
+          <input type="text" class="char-fear cc-input" placeholder="What they fear" />
+        </div>
+      </div>
+
+      <div class="custom-char-slot">
+        <div class="cc-row">
+          <input type="text" class="char-name cc-input" placeholder="Character name" />
+          <input type="text" class="char-traits cc-input" placeholder="Personality" />
+        </div>
+        <div class="cc-row">
+          <input type="text" class="char-goal cc-input" placeholder="What they want" />
+          <input type="text" class="char-fear cc-input" placeholder="What they fear" />
+        </div>
+      </div>
+
+      <div class="custom-char-slot">
+        <div class="cc-row">
+          <input type="text" class="char-name cc-input" placeholder="Character name" />
+          <input type="text" class="char-traits cc-input" placeholder="Personality" />
+        </div>
+        <div class="cc-row">
+          <input type="text" class="char-goal cc-input" placeholder="What they want" />
+          <input type="text" class="char-fear cc-input" placeholder="What they fear" />
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Characters -->
@@ -120,7 +174,12 @@
     <span id="turns-display">8 turns</span>
   </div>
 
-  <button class="generate-btn" id="generate-btn">Generate Story</button>
+  <button class="generate-btn" id="generate-btn">
+    <span class="generate-btn-icon">✦</span>
+    Begin the Story
+  </button>
+
+  </div><!-- /setup-body -->
 
 </div>
 
@@ -154,6 +213,9 @@
 ══════════════════════════════════════════════════════════════════════════ -->
 <div id="storybook-screen" class="screen">
 
+  <!-- 3D book splash — full-screen overlay, shown while book "opens" -->
+  <div id="book-3d-splash"></div>
+
   <div class="book-header">
     <h2 class="book-title" id="story-title">Once Upon a Time…</h2>
     <p class="book-subtitle" id="story-subtitle">An emergent tale — no two runs alike</p>
@@ -174,6 +236,8 @@
 
   <div class="book-actions">
     <button class="ghost-btn" id="restart-btn">Tell Another Story</button>
+    <button class="ghost-btn" id="rerun-btn">Same World, New Story</button>
+    <button class="ghost-btn read-aloud-btn" id="read-aloud-btn" disabled>▶ Read Aloud</button>
     <button class="ghost-btn" id="log-toggle-btn">Show Simulation Log</button>
   </div>
 
@@ -181,6 +245,7 @@
 
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

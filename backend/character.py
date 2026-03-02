@@ -23,6 +23,7 @@ class CharacterState:
     goal: str
     fear: str
     current_location: str
+    appearance: str = ""           # visual description for illustration prompts
     emotional_state: str = "curious"
     knowledge: CharacterKnowledge = field(default_factory=CharacterKnowledge)
     goal_achieved: bool = False
@@ -77,4 +78,5 @@ def make_character(char_config: dict) -> "CharacterState":
         goal=char_config.get("goal", "Find adventure"),
         fear=char_config.get("fear", "Being left behind"),
         current_location=char_config.get("starting_location", ""),
+        appearance=char_config.get("appearance", ""),
     )

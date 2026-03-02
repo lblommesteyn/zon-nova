@@ -84,7 +84,9 @@ async def generate_story(websocket: WebSocket):
 
         await send({"type": "status", "message": "Writing illustration notes..."})
 
-        illustration_prompts = await compiler.generate_illustration_prompts(pages)
+        illustration_prompts = await compiler.generate_illustration_prompts(
+            pages, list(characters.values())
+        )
 
         # ── Send story text now so the UI can start showing pages ──────────
         await send({
