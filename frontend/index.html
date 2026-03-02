@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Emergent Story Engine</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,300;1,400;1,600&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SCREEN 1 — SETUP
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="setup-screen" class="screen active">
+
+  <header class="setup-header">
+    <h1>Emergent Story Engine</h1>
+    <p>Characters make decisions. The story emerges. Every run is different.</p>
+  </header>
+
+  <!-- Theme -->
+  <div class="theme-section">
+    <div class="section-label">Choose a world</div>
+    <div class="theme-grid">
+      <div class="theme-card" data-preset="enchanted_forest" data-theme="Enchanted Forest">
+        <span class="theme-icon">🌲</span>
+        <span class="theme-name">Enchanted Forest</span>
+      </div>
+      <div class="theme-card" data-preset="pirate_ship" data-theme="Pirate Ship Adventure">
+        <span class="theme-icon">🏴‍☠️</span>
+        <span class="theme-name">Pirate Ship</span>
+      </div>
+      <div class="theme-card" data-preset="space_station" data-theme="Space Station">
+        <span class="theme-icon">🚀</span>
+        <span class="theme-name">Space Station</span>
+      </div>
+      <div class="theme-card" data-preset="underwater_kingdom" data-theme="Underwater Kingdom">
+        <span class="theme-icon">🐠</span>
+        <span class="theme-name">Underwater Kingdom</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="custom-input-wrap">
+    <input type="text" id="custom-theme" placeholder="or describe your own world…" />
+  </div>
+
+  <!-- Characters -->
+  <div class="characters-section">
+    <div class="section-label">Your characters</div>
+    <div class="character-cards">
+
+      <div class="char-card" id="char-0" data-num="I">
+        <div class="char-field">
+          <label>Name</label>
+          <input type="text" class="char-name" placeholder="e.g. Lily" />
+        </div>
+        <div class="char-field">
+          <label>Personality</label>
+          <input type="text" class="char-traits" placeholder="curious, brave, warm-hearted" />
+        </div>
+        <div class="char-field">
+          <label>Secret Goal</label>
+          <textarea class="char-goal" placeholder="What does this character want more than anything?"></textarea>
+        </div>
+        <div class="char-field">
+          <label>Deepest Fear</label>
+          <input type="text" class="char-fear" placeholder="What keeps them up at night?" />
+        </div>
+      </div>
+
+      <div class="char-card" id="char-1" data-num="II">
+        <div class="char-field">
+          <label>Name</label>
+          <input type="text" class="char-name" placeholder="e.g. Bramble" />
+        </div>
+        <div class="char-field">
+          <label>Personality</label>
+          <input type="text" class="char-traits" placeholder="grumpy, wise, secretly gentle" />
+        </div>
+        <div class="char-field">
+          <label>Secret Goal</label>
+          <textarea class="char-goal" placeholder="What does this character want more than anything?"></textarea>
+        </div>
+        <div class="char-field">
+          <label>Deepest Fear</label>
+          <input type="text" class="char-fear" placeholder="What keeps them up at night?" />
+        </div>
+      </div>
+
+      <div class="char-card" id="char-2" data-num="III">
+        <div class="char-field">
+          <label>Name</label>
+          <input type="text" class="char-name" placeholder="e.g. Pip" />
+        </div>
+        <div class="char-field">
+          <label>Personality</label>
+          <input type="text" class="char-traits" placeholder="mischievous, quick, loyal" />
+        </div>
+        <div class="char-field">
+          <label>Secret Goal</label>
+          <textarea class="char-goal" placeholder="What does this character want more than anything?"></textarea>
+        </div>
+        <div class="char-field">
+          <label>Deepest Fear</label>
+          <input type="text" class="char-fear" placeholder="What keeps them up at night?" />
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Story length -->
+  <div class="settings-row">
+    <label for="max-turns">Story length</label>
+    <input type="range" id="max-turns" min="4" max="12" value="8" step="1" />
+    <span id="turns-display">8 turns</span>
+  </div>
+
+  <button class="generate-btn" id="generate-btn">Generate Story</button>
+
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SCREEN 2 — SIMULATION
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="simulation-screen" class="screen">
+
+  <div class="sim-header">
+    <h2>Story Emerging</h2>
+    <p>Characters are making decisions. Watch the world unfold in real time.</p>
+  </div>
+
+  <div class="sim-panel">
+    <div class="sim-status">
+      <div class="sim-status-dot"></div>
+      <span id="sim-status-text">Initializing…</span>
+    </div>
+    <div class="sim-log" id="sim-log"></div>
+    <div class="progress-wrap">
+      <div class="progress-bar" id="progress-bar"></div>
+    </div>
+  </div>
+
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     SCREEN 3 — STORYBOOK
+══════════════════════════════════════════════════════════════════════════ -->
+<div id="storybook-screen" class="screen">
+
+  <div class="book-header">
+    <h2 class="book-title" id="story-title">Once Upon a Time…</h2>
+    <p class="book-subtitle" id="story-subtitle">An emergent tale — no two runs alike</p>
+  </div>
+
+  <div class="book-container">
+    <div class="book" id="the-book">
+      <div class="book-page left" id="page-left"></div>
+      <div class="book-page right" id="page-right"></div>
+    </div>
+  </div>
+
+  <div class="book-nav">
+    <button class="nav-btn" id="prev-btn" aria-label="Previous">◀</button>
+    <span class="page-indicator" id="page-indicator"></span>
+    <button class="nav-btn" id="next-btn" aria-label="Next">▶</button>
+  </div>
+
+  <div class="book-actions">
+    <button class="ghost-btn" id="restart-btn">Tell Another Story</button>
+    <button class="ghost-btn" id="log-toggle-btn">Show Simulation Log</button>
+  </div>
+
+  <div class="replay-log" id="replay-log"></div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+idea.txt
+
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+*.egg-info/
+
+# Environment / secrets
+.env
+.env.*
+*.csv
+
+# OS
+.DS_Store
+Thumbs.db
